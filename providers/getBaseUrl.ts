@@ -1,5 +1,7 @@
-const urlsEndpoint =
-  "https://raw.githubusercontent.com/d0x-dev/airflix-providers/refs/heads/main/urls.json";
+const urlsEndpoints = [
+  "https://raw.githubusercontent.com/d0x-dev/airflix-providers/refs/heads/main/urls.json",
+  "https://cdn.jsdelivr.net/gh/d0x-dev/airflix-providers@main/urls.json",
+];
 const cacheTtl = 60 * 60 * 1000;
 
 type ProviderUrls = Record<string, { url: string }>;
@@ -26,6 +28,21 @@ function getCache(): BaseUrlCache {
   return state.__airflixProviderBaseUrlCache__;
 }
 
+async function fetchFromEndpoints(): Promise<ProviderUrls> {
+  let lastError: unknown;
+  for (const endpoint of urlsEndpoints) {
+    try {
+      const response = await fetch(endpoint);
+      if (response.ok) {
+        return (await response.json()) as ProviderUrls;
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("Failed to fetch provider URL configuration");
+}
+
 async function fetchProviderUrls(): Promise<ProviderUrls> {
   const cache = getCache();
 
@@ -37,13 +54,8 @@ async function fetchProviderUrls(): Promise<ProviderUrls> {
     return cache.request;
   }
 
-  const request = fetch(urlsEndpoint)
-    .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`URL configuration request failed: ${response.status}`);
-      }
-
-      const data = (await response.json()) as ProviderUrls;
+  const request = fetchFromEndpoints()
+    .then((data) => {
       console.log("Fetched provider URL configuration");
       cache.data = data;
       cache.expiresAt = Date.now() + cacheTtl;
