@@ -1,4 +1,6 @@
 import { throwProviderError } from "../providerErrors";
+import { ProviderContext } from "../types";
+import { gofileExtractor } from "./gofile";
 
 const hubcloudDecode = function (value: string) {
   if (value === undefined) {
@@ -44,13 +46,43 @@ const getRedirectedPixelDrainUrl = (
   return "";
 };
 
+
+
+async function resolveGofileLink(
+  gofileLink: string,
+  axios: any,
+  providerContext?: any,
+) {
+  try {
+    const gofileUrl = new URL(gofileLink);
+    const id = gofileUrl.pathname.split("/").filter(Boolean).pop();
+    if (!id) return null;
+    const gfResult = await gofileExtractor(id, axios, providerContext);
+    if (!gfResult?.link || !gfResult?.token) return null;
+    return {
+      server: "Gofile",
+      link: gfResult.link,
+      type: "mkv",
+      headers: {
+        Referer: "https://gofile.io/",
+        Cookie: `accountToken=${gfResult.token}`,
+      },
+    };
+  } catch (error) {
+    console.log("hubcloudExtractor: resolveGofileLink error:", error);
+    return null;
+  }
+}
+
 export async function hubcloudExtractor(
   link: string,
   signal: AbortSignal,
   axios: any,
   cheerio: any,
   headers: Record<string, string>,
-  providerContext?: any,
+  providerContext?: ProviderContext,
+  isDownload?: boolean,
+  providerValue?: string,
 ) {
   try {
     if (!headers["Cookie"]) {
@@ -73,11 +105,7 @@ export async function hubcloudExtractor(
             `hubcloudExtractor: WAF detected (403) for ${link}, using solver...`,
           );
           const cleanHeaders = { ...headers, Referer: baseUrl };
-          delete cleanHeaders["User-Agent"];
-          delete cleanHeaders["sec-ch-ua"];
-          delete cleanHeaders["sec-ch-ua-mobile"];
-          delete cleanHeaders["sec-ch-ua-platform"];
-          delete cleanHeaders["Cookie"];
+
 
           const wafResult = await openWebView(baseUrl, {
             title: "Solve the captcha below and click done",
@@ -104,6 +132,19 @@ export async function hubcloudExtractor(
 
     const vLinkText = vLinkRes.data;
     const $vLink = cheerio.load(vLinkText);
+
+    // Check if initial page contains any direct Gofile download button/links
+    const vLinkGofileBtns = $vLink("a[href*='gofile.io']");
+    for (const el of vLinkGofileBtns) {
+      const gfHref = $vLink(el).attr("href");
+      if (gfHref) {
+        const gfStream = await resolveGofileLink(gfHref, axios, providerContext);
+        if (gfStream && !streamLinks.some((s) => s.link === gfStream.link)) {
+          streamLinks.push(gfStream);
+        }
+      }
+    }
+
     let vcloudLink =
       extractUrlFromScript(vLinkText) ||
       $vLink(".fa-file-download.fa-lg").parent().attr("href") ||
@@ -114,65 +155,32 @@ export async function hubcloudExtractor(
       console.log("New vcloudLink", vcloudLink);
     }
 
+    // If vcloudLink is directly a Gofile URL
+    if (vcloudLink?.includes("gofile.io")) {
+      const gfStream = await resolveGofileLink(vcloudLink, axios, providerContext);
+      if (gfStream && !streamLinks.some((s) => s.link === gfStream.link)) {
+        streamLinks.push(gfStream);
+      }
+    }
+
     let vcloudText = "";
-    try {
-      const vcloudRes = await axios.get(vcloudLink, { headers, signal });
-      vcloudText = vcloudRes.data;
-    } catch (error: any) {
-      if (error.response?.status === 403 && openWebView) {
-        console.log(
-          `hubcloudExtractor: WAF detected (403) for ${vcloudLink}, using solver...`,
-        );
-        const vcloudBaseUrl = vcloudLink.split("/").slice(0, 3).join("/");
-        const cleanHeaders2 = { ...headers, Referer: vcloudBaseUrl };
-        delete cleanHeaders2["User-Agent"];
-        delete cleanHeaders2["sec-ch-ua"];
-        delete cleanHeaders2["sec-ch-ua-mobile"];
-        delete cleanHeaders2["sec-ch-ua-platform"];
-        delete cleanHeaders2["Cookie"];
-
-        const wafResult = await openWebView(vcloudBaseUrl, {
-          title: "Solve the captcha below and click done",
-          description: "Required to bypass anti-bot protection.",
-          headers: cleanHeaders2,
-          waitForCookie: "cf_clearance",
-          force: true,
-        });
-        if (wafResult.userAgent) headers["User-Agent"] = wafResult.userAgent;
-        headers["Cookie"] =
-          (headers["Cookie"] ? headers["Cookie"] + "; " : "") +
-          wafResult.cookies;
-        const retryRes = await axios.get(vcloudLink, { headers, signal });
-        vcloudText = retryRes.data;
-      } else {
-        if (error.response?.status === 403 && !openWebView) {
-          console.log(
-            `hubcloudExtractor: 403 Forbidden for ${vcloudLink}, but openWebView solver is not available!`,
-          );
-        }
-        // Fallback to fetch
-        let fetchRes = await fetch(vcloudLink, {
-          headers,
-          signal,
-          redirect: "follow",
-        });
-
-        if (fetchRes.status === 403 && openWebView) {
+    if (vcloudLink && !vcloudLink.includes("gofile.io") && vcloudLink !== link) {
+      try {
+        const vcloudRes = await axios.get(vcloudLink, { headers, signal });
+        vcloudText = vcloudRes.data;
+      } catch (error: any) {
+        if (error.response?.status === 403 && openWebView) {
           console.log(
             `hubcloudExtractor: WAF detected (403) for ${vcloudLink}, using solver...`,
           );
           const vcloudBaseUrl = vcloudLink.split("/").slice(0, 3).join("/");
-          const cleanHeaders3 = { ...headers, Referer: vcloudBaseUrl };
-          delete cleanHeaders3["User-Agent"];
-          delete cleanHeaders3["sec-ch-ua"];
-          delete cleanHeaders3["sec-ch-ua-mobile"];
-          delete cleanHeaders3["sec-ch-ua-platform"];
-          delete cleanHeaders3["Cookie"];
+          const cleanHeaders2 = { ...headers, Referer: vcloudBaseUrl };
+
 
           const wafResult = await openWebView(vcloudBaseUrl, {
             title: "Solve the captcha below and click done",
             description: "Required to bypass anti-bot protection.",
-            headers: cleanHeaders3,
+            headers: cleanHeaders2,
             waitForCookie: "cf_clearance",
             force: true,
           });
@@ -180,19 +188,11 @@ export async function hubcloudExtractor(
           headers["Cookie"] =
             (headers["Cookie"] ? headers["Cookie"] + "; " : "") +
             wafResult.cookies;
-          fetchRes = await fetch(vcloudLink, {
-            headers,
-            signal,
-            redirect: "follow",
-          });
+          const retryRes = await axios.get(vcloudLink, { headers, signal });
+          vcloudText = retryRes.data;
+        } else {
+          throw error;
         }
-
-        if (!fetchRes.ok) {
-          throw new Error(
-            `HTTP ${fetchRes.status} ${fetchRes.statusText} | URL ${vcloudLink}`,
-          );
-        }
-        vcloudText = await fetchRes.text();
       }
     }
     const $ = cheerio.load(vcloudText);
@@ -227,55 +227,64 @@ export async function hubcloudExtractor(
           break;
 
         case link?.includes(".dev") && !link?.includes("/?id="):
-          streamLinks.push({ server: "Cf Worker", link: link, type: "mkv" });
+          streamLinks.push({ server: "CF Worker", link: link, type: "mkv" });
           break;
 
         case link?.includes("hubcloud") || link?.includes("/?id="):
           try {
-            const newLinkRes = await fetch(link, {
-              method: "HEAD",
-              headers,
-              signal,
-              redirect: "manual",
-            });
-
-            // Check if response is a redirect (301, 302, etc.)
             let newLink = link;
-            if (newLinkRes.status >= 300 && newLinkRes.status < 400) {
-              newLink = newLinkRes.headers.get("location") || link;
-            } else if (newLinkRes.url && newLinkRes.url !== link) {
-              // Fallback: check if URL changed (redirect was followed)
-              newLink = newLinkRes.url;
-            } else {
-              newLink = newLinkRes.headers.get("location") || link;
-            }
-            if (newLink.includes("googleusercontent")) {
-              newLink = newLink.split("?link=")[1];
-            } else {
-              const newLinkRes2 = await fetch(newLink, {
-                method: "HEAD",
-                headers,
-                signal,
-                redirect: "manual",
-              });
 
-              // Check if response is a redirect
-              if (newLinkRes2.status >= 300 && newLinkRes2.status < 400) {
-                newLink =
-                  newLinkRes2.headers.get("location")?.split("?link=")[1] ||
-                  newLink;
-              } else if (newLinkRes2.url && newLinkRes2.url !== newLink) {
-                // Fallback: URL changed due to redirect
-                newLink = newLinkRes2.url.split("?link=")[1] || newLinkRes2.url;
-              } else {
-                newLink =
-                  newLinkRes2.headers.get("location")?.split("?link=")[1] ||
-                  newLink;
+            // 1. Try fetch with redirect: "follow" (ideal for mobile WebWorkers)
+            try {
+              if (typeof fetch !== "undefined") {
+                const fRes = await fetch(link, {
+                  headers,
+                  signal,
+                  redirect: "follow",
+                });
+                if (fRes.url && fRes.url.includes("googleusercontent")) {
+                  newLink = fRes.url.split("?link=")[1] || fRes.url;
+                } else if (fRes.url && fRes.url !== link) {
+                  newLink = fRes.url;
+                }
               }
+            } catch { }
+
+            // 2. Fallback to axios with maxRedirects: 0 (for Node/desktop)
+            if (!newLink.includes("googleusercontent")) {
+              try {
+                const res1 = await axios.get(newLink, {
+                  headers,
+                  signal,
+                  maxRedirects: 0,
+                  validateStatus: (s: number) => s >= 200 && s < 400,
+                });
+                if (res1.headers?.["location"]) {
+                  newLink = res1.headers["location"];
+                }
+                if (newLink.includes("googleusercontent")) {
+                  newLink = newLink.split("?link=")[1] || newLink;
+                } else if (newLink.includes("http")) {
+                  const res2 = await axios.get(newLink, {
+                    headers,
+                    signal,
+                    maxRedirects: 0,
+                    validateStatus: (s: number) => s >= 200 && s < 400,
+                  });
+                  if (res2.headers?.["location"]) {
+                    const loc2 = res2.headers["location"];
+                    newLink = loc2.includes("?link=") ? loc2.split("?link=")[1] : loc2;
+                  }
+                }
+              } catch { }
+            }
+
+            if (newLink.includes("?link=")) {
+              newLink = newLink.split("?link=")[1] || newLink;
             }
 
             streamLinks.push({
-              server: "hubcloud",
+              server: "GDrive (download only)",
               link: newLink,
               type: "mkv",
             });
@@ -284,8 +293,19 @@ export async function hubcloudExtractor(
           }
           break;
 
+        case link?.includes("gofile.io"):
+          try {
+            const gfStream = await resolveGofileLink(link, axios, providerContext);
+            if (gfStream && !streamLinks.some((s) => s.link === gfStream.link)) {
+              streamLinks.push(gfStream);
+            }
+          } catch (error) {
+            console.log("hubcloudExtractor error in gofile link: ", error);
+          }
+          break;
+
         case link?.includes("cloudflarestorage"):
-          streamLinks.push({ server: "CfStorage", link: link, type: "mkv" });
+          streamLinks.push({ server: "CF Storage", link: link, type: "mkv" });
           break;
 
         case link?.includes("fastdl") || link?.includes("fsl."):
@@ -302,15 +322,63 @@ export async function hubcloudExtractor(
 
         default:
           if (link?.includes(".mkv") || link?.includes("?token=")) {
-            const serverName =
-              link
-                .match(/^(?:https?:\/\/)?(?:www\.)?([^\/]+)/i)?.[1]
-                ?.replace(/\./g, " ") || "Unknown";
+            const serverName = "CF Worker";
             streamLinks.push({ server: serverName, link: link, type: "mkv" });
           }
           break;
       }
     }
+
+    let preferredServer = "auto";
+    try {
+      const specificKey = providerValue
+        ? `${providerValue}_preferredDownloadServer`
+        : "";
+      preferredServer = (
+        (specificKey
+          ? await providerContext?.kvStore?.get<string>(specificKey)
+          : undefined) ||
+        (await providerContext?.kvStore?.get<string>("preferredDownloadServer")) ||
+        "auto"
+      )
+        .toLowerCase()
+        .trim();
+    } catch { }
+
+    const getPriority = (serverName: string = "") => {
+      const s = serverName.toLowerCase();
+      if (
+        isDownload &&
+        preferredServer !== "auto" &&
+        preferredServer !== "" &&
+        s.includes(preferredServer)
+      ) {
+        return 0;
+      }
+      if (isDownload) {
+        if (s.includes("cf storage") || s.includes("storage") || s.includes("resumable")) return 1;
+        if (s.includes("gdrive") || s.includes("google") || s.includes("instant")) return 2;
+        if (s.includes("pixeldrain")) return 3;
+        if (s.includes("gofile")) return 4;
+        if (s.includes("fastdl") || s.includes("fsl")) return 5;
+        if (s.includes("hubcdn")) return 6;
+        if (s.includes("cf worker") || s.includes("worker") || s.includes("fast cloud")) return 8;
+        return 10;
+      } else {
+        if (s.includes("cf storage") || s.includes("storage")) return 1;
+        if (s.includes("cf worker") || s.includes("worker") || s.includes("fast cloud")) return 2;
+        if (s.includes("gofile")) return 3;
+        if (s.includes("pixeldrain")) return 4;
+        if (s.includes("fastdl") || s.includes("fsl")) return 5;
+        if (s.includes("hubcdn")) return 6;
+        if (s.includes("gdrive") || s.includes("google")) return 7;
+        return 10;
+      }
+    };
+
+    streamLinks.sort((a, b) => getPriority(a.server) - getPriority(b.server));
+
+
 
     console.log("streamLinks", streamLinks);
     return streamLinks;

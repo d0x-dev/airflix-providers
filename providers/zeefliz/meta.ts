@@ -1,6 +1,12 @@
+import { getPage } from "./request";
 import { Info, Link, ProviderContext } from "../types";
 import { getBaseUrl } from "../getBaseUrl";
-import { applyCinemetaMeta, getCinemetaMeta } from "../getCinemetaMeta";
+import {
+  addCinemetaContext,
+  applyCinemetaMeta,
+  getCinemetaMeta,
+  getCinemetaSeason,
+} from "../getCinemetaMeta";
 import { throwProviderError } from "../providerErrors";
 
 // Headers
@@ -35,9 +41,7 @@ export const getMeta = async function ({
   const url = new URL(link, `${baseUrl}/`).href;
 
   try {
-    const response = await axios.get(url, {
-      headers: { ...headers, Referer: baseUrl },
-    });
+    const response = await getPage(url, providerContext);
     const $ = cheerio.load(response.data);
     const content = $(".entry-content, .post-inner").length
       ? $(".entry-content, .post-inner")
@@ -167,7 +171,13 @@ export const getMeta = async function ({
         const h5Text = $(h5).text().trim();
         const qualityMatch = h5Text.match(/\d+p/)?.[0] || "";
 
-        const href = $(h5).next("p").find("a").attr("href");
+        const href = $(h5).next("p").find("a[href]").filter((_, a) => {
+          try {
+            return !/(?:^|\.)playdrive\./i.test(new URL($(a).attr("href")!, url).hostname);
+          } catch {
+            return false;
+          }
+        }).first().attr("href");
         if (href) {
           links.push({
             title: h5Text,
@@ -183,16 +193,42 @@ export const getMeta = async function ({
 
     result.linkList = links;
     result.webUrl = url;
+    const quickDownload = await providerContext.kvStore?.get<boolean>("zeefliz_quickDownload");
+    result.quickDownload = Boolean(quickDownload);
     const imdbId = result.imdbId;
-    result.imdbId = "";
     if (!imdbId) return result;
 
-    const cinemeta = await getCinemetaMeta(
-      imdbId,
-      result.type,
-      providerContext,
-    );
-    return applyCinemetaMeta(result, cinemeta);
+    try {
+      const cinemeta = await getCinemetaMeta(
+        imdbId,
+        result.type,
+        providerContext,
+      );
+      if (cinemeta) {
+        if (result.type === "series" && cinemeta.type === "series") {
+          result.linkList = result.linkList.map((item) => {
+            const season =
+              getCinemetaSeason(item.title) || getCinemetaSeason(result.title);
+            if (!season) return item;
+            if (item.episodesLink) {
+              return {
+                ...item,
+                episodesLink: addCinemetaContext(
+                  new URL(item.episodesLink, url).href,
+                  imdbId,
+                  season,
+                ),
+              };
+            }
+            return item;
+          });
+        }
+        return applyCinemetaMeta(result, cinemeta);
+      }
+    } catch {
+      // Fallback to scraped metadata if Cinemeta lookup fails
+    }
+    return result;
   } catch (err) {
     throwProviderError("ZeeFliz", "metadata", err);
   }

@@ -1,7 +1,5 @@
-const urlsEndpoints = [
-  "https://raw.githubusercontent.com/d0x-dev/airflix-providers/refs/heads/main/urls.json",
-  "https://cdn.jsdelivr.net/gh/d0x-dev/airflix-providers@main/urls.json",
-];
+const urlsEndpoint =
+  "https://raw.githubusercontent.com/Zenda-Cross/vega-providers/refs/heads/main/urls.json";
 const cacheTtl = 60 * 60 * 1000;
 
 type ProviderUrls = Record<string, { url: string }>;
@@ -13,7 +11,7 @@ type BaseUrlCache = {
 };
 
 type ProviderState = {
-  __airflixProviderBaseUrlCache__?: BaseUrlCache;
+  __vegaProviderBaseUrlCache__?: BaseUrlCache;
 };
 
 declare const providerGlobal: ProviderState | undefined;
@@ -24,23 +22,8 @@ function getCache(): BaseUrlCache {
       ? providerGlobal
       : (globalThis as typeof globalThis & ProviderState);
 
-  state.__airflixProviderBaseUrlCache__ ??= { expiresAt: 0 };
-  return state.__airflixProviderBaseUrlCache__;
-}
-
-async function fetchFromEndpoints(): Promise<ProviderUrls> {
-  let lastError: unknown;
-  for (const endpoint of urlsEndpoints) {
-    try {
-      const response = await fetch(endpoint);
-      if (response.ok) {
-        return (await response.json()) as ProviderUrls;
-      }
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error("Failed to fetch provider URL configuration");
+  state.__vegaProviderBaseUrlCache__ ??= { expiresAt: 0 };
+  return state.__vegaProviderBaseUrlCache__;
 }
 
 async function fetchProviderUrls(): Promise<ProviderUrls> {
@@ -54,8 +37,13 @@ async function fetchProviderUrls(): Promise<ProviderUrls> {
     return cache.request;
   }
 
-  const request = fetchFromEndpoints()
-    .then((data) => {
+  const request = fetch(urlsEndpoint)
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`URL configuration request failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as ProviderUrls;
       console.log("Fetched provider URL configuration");
       cache.data = data;
       cache.expiresAt = Date.now() + cacheTtl;

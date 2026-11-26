@@ -16,6 +16,5 @@ export const catalog = [
       filter: "/category/Telugu-Web-Series.html",
     },
   ];
-  
+
   export const genres = [];
-  

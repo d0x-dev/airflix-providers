@@ -35,13 +35,16 @@ function pixelDrainStream(link: string): Stream[] {
 
 export async function getStream({
   link,
+  type,
   signal,
   providerContext,
+  isDownload,
 }: {
   link: string;
   type: string;
   signal: AbortSignal;
   providerContext: ProviderContext;
+  isDownload?: boolean;
 }): Promise<Stream[]> {
   const baseUrl = await getMkvDramaUrl("/");
   let target = link;
@@ -62,8 +65,8 @@ export async function getStream({
   if (/gofile\.io/.test(hostname)) {
     const id = new URL(target).pathname.split("/").filter(Boolean).pop();
     if (!id) return [];
-    const result = await gofileExtractor(id, axios);
-    if (!result.link || !result.token) return [];
+    const result = await gofileExtractor(id, axios, providerContext);
+    if (!result?.link || !result?.token) return [];
     return [
       {
         server: "GoFile",
@@ -87,7 +90,16 @@ export async function getStream({
     );
   }
   if (/hubcloud|hubdrive|vcloud|cloud/.test(hostname)) {
-    return hubcloudExtractor(target, signal, axios, cheerio, headers);
+    return hubcloudExtractor(
+      target,
+      signal,
+      axios,
+      cheerio,
+      headers,
+      providerContext,
+      isDownload,
+      "mkvDrama",
+    );
   }
 
   return [

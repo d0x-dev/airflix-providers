@@ -5,6 +5,7 @@ import {
   getCinemetaMeta,
   readCinemetaContext,
 } from "../getCinemetaMeta";
+import { enrichEpisodesWithSkipTimings } from "../theintrodb";
 
 export const getEpisodes = async function ({
   url,
@@ -129,18 +130,49 @@ export const getEpisodes = async function ({
       preferredEpisodeLinks.length > 0
         ? preferredEpisodeLinks
         : [{ title: "Play", link: context.requestUrl }];
-    if (!context.imdbId || !context.season) return episodes;
+    const quickDownload = await providerContext.kvStore?.get<boolean>("drive_quickDownload");
+    if (!context.imdbId || !context.season) {
+      return episodes.map((e) => ({
+        ...e,
+        quickDownload: quickDownload ?? true,
+      }));
+    }
 
-    const cinemeta = await getCinemetaMeta(
-      context.imdbId,
-      "series",
-      providerContext,
-    );
-    return enrichCinemetaEpisodes(
-      episodes,
-      cinemeta.videos || [],
-      context.season,
-    );
+    let enrichedEpisodes = episodes;
+    try {
+      const cinemeta = await getCinemetaMeta(
+        context.imdbId,
+        "series",
+        providerContext,
+      );
+      if (cinemeta) {
+        enrichedEpisodes = enrichCinemetaEpisodes(
+          episodes,
+          cinemeta.videos || [],
+          context.season,
+        );
+      }
+    } catch (e) {
+      console.warn("Drive: Cinemeta episode lookup failed", e);
+    }
+
+    const skipTimings = await providerContext.kvStore?.get<boolean>("drive_skipTimings");
+    if (skipTimings ?? true) {
+      try {
+        enrichedEpisodes = await enrichEpisodesWithSkipTimings(
+          enrichedEpisodes,
+          context.imdbId,
+          context.season,
+          providerContext,
+        );
+      } catch (e) {
+        console.warn("Drive: Skip timings lookup failed", e);
+      }
+    }
+    return enrichedEpisodes.map((e) => ({
+      ...e,
+      quickDownload: quickDownload ?? true,
+    }));
   } catch (err) {
     throwProviderError("Drive", "episodes", err);
   }

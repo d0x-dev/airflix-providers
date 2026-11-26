@@ -1,3 +1,4 @@
+import { formatEpisodeTitle } from "../getCinemetaMeta";
 import { EpisodeLink, Info, Link, ProviderContext } from "../types";
 
 export const getMeta = async function ({
@@ -17,6 +18,7 @@ export const getMeta = async function ({
       synopsis: data?.meta?.description || "",
       image: data?.meta?.background || "",
       imdbId: data?.meta?.imdb_id || "",
+      tmdbId: data?.meta?.moviedb_id?.toString() || undefined,
       type: data?.meta?.type || "movie",
     };
 
@@ -30,7 +32,7 @@ export const getMeta = async function ({
           season.set(video?.season, []);
         }
         season.get(video?.season).push({
-          title: "Episode " + video?.episode,
+          title: formatEpisodeTitle(video?.episode, video?.name),
           type: "series",
           link: `${data?.meta?.imdb_id}-${video?.id?.split(":")[1]}-${
             video?.id?.split(":")[2]

@@ -2,6 +2,7 @@ const esbuild = require("esbuild");
 const fs = require("fs");
 const path = require("path");
 const { minify } = require("terser");
+const {createProviderHeader} = require("./provider-build-metadata");
 
 const SKIP_MINIFY = process.env.SKIP_MINIFY === "true";
 
@@ -17,6 +18,12 @@ const providerDirs = fs
   )
   .map((dirent) => dirent.name);
 
+// Validate all stamps before clearing dist; never publish files with guessed versions.
+const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "manifest.json"), "utf8"));
+const providerHeaders = new Map(providerDirs.map(name => [
+  name, createProviderHeader(manifest.find(entry => entry.value === name)),
+]));
+
 console.log(`Found ${providerDirs.length} providers to build`);
 
 async function buildProvider(providerName) {
@@ -28,7 +35,7 @@ async function buildProvider(providerName) {
     fs.mkdirSync(distPath, { recursive: true });
   }
 
-  const modules = ["catalog", "posts", "meta", "stream", "episodes"];
+  const modules = ["catalog", "posts", "meta", "stream", "episodes", "settings"];
   const results = [];
 
   for (const moduleName of modules) {
@@ -71,7 +78,9 @@ async function buildProvider(providerName) {
           .split(",")
           .map((entry) => {
             const match = entry.trim().match(/(\w+):\s*\(\)\s*=>\s*(\w+)/);
-            return match ? match[1] : null;
+            return match
+              ? { exportName: match[1], localName: match[2] }
+              : null;
           })
           .filter(Boolean);
 
@@ -83,7 +92,10 @@ async function buildProvider(providerName) {
 
         // Add direct exports assignments at the end
         const directExports = exportEntries
-          .map((name) => `exports.${name} = ${name};`)
+          .map(
+            ({ exportName, localName }) =>
+              `exports.${exportName} = ${localName};`,
+          )
           .join("\n");
 
         // Add the exports before the final comment
@@ -127,6 +139,9 @@ async function buildProvider(providerName) {
         }
       }
 
+      // Stamp after minification so the compatibility comment is always retained.
+      code = providerHeaders.get(providerName) + code;
+
       // Write the output
       const outputPath = path.join(distPath, `${moduleName}.js`);
       fs.writeFileSync(outputPath, code);
@@ -144,6 +159,7 @@ async function buildProvider(providerName) {
         `✗ Error building ${providerName}/${moduleName}:`,
         error.message,
       );
+      throw error;
     }
   }
 

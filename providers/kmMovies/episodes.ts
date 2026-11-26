@@ -5,6 +5,7 @@ import {
   getCinemetaMeta,
   readCinemetaContext,
 } from "../getCinemetaMeta";
+import { enrichEpisodesWithSkipTimings } from "../theintrodb";
 
 const headers = {
   "User-Agent":
@@ -41,18 +42,49 @@ export const getEpisodes = async function ({
       }
     });
 
-    if (!context.imdbId || !context.season) return episodes;
+    const quickDownload = await providerContext.kvStore?.get<boolean>("kmMovies_quickDownload");
+    if (!context.imdbId || !context.season) {
+      return episodes.map((e) => ({
+        ...e,
+        quickDownload: quickDownload ?? true,
+      }));
+    }
 
-    const cinemeta = await getCinemetaMeta(
-      context.imdbId,
-      "series",
-      providerContext,
-    );
-    return enrichCinemetaEpisodes(
-      episodes,
-      cinemeta.videos || [],
-      context.season,
-    );
+    let enriched = episodes;
+    try {
+      const cinemeta = await getCinemetaMeta(
+        context.imdbId,
+        "series",
+        providerContext,
+      );
+      if (cinemeta) {
+        enriched = enrichCinemetaEpisodes(
+          episodes,
+          cinemeta.videos || [],
+          context.season,
+        );
+      }
+    } catch (e) {
+      console.warn("KMMovies: Cinemeta episode lookup failed", e);
+    }
+
+    const skipTimings = await providerContext.kvStore?.get<boolean>("kmMovies_skipTimings");
+    if (skipTimings ?? true) {
+      try {
+        enriched = await enrichEpisodesWithSkipTimings(
+          enriched,
+          context.imdbId,
+          context.season,
+          providerContext,
+        );
+      } catch (e) {
+        console.warn("KMMovies: Skip timings lookup failed", e);
+      }
+    }
+    return enriched.map((e) => ({
+      ...e,
+      quickDownload: quickDownload ?? true,
+    }));
   } catch (err) {
     throwProviderError("KMMovies", "episodes", err);
   }

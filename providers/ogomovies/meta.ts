@@ -40,7 +40,7 @@ async function getDownloadLinks(
 
         // Find the specific episode item and extract the data-putload URL
         const serverLink = $('li[data-server="3"][data-putload]').attr('data-putload');
-        
+
         if (!serverLink) {
             console.log("Failed to find server link (data-putload) on watch page.");
             return finalLinks;
@@ -64,7 +64,7 @@ async function getDownloadLinks(
 
         // Find the iframe src (the final download page URL)
         const finalDownloadPageUrl = $('.video-container iframe').attr('src');
-        
+
         if (!finalDownloadPageUrl) {
             console.log("Failed to find final download page URL (iframe src).");
             return finalLinks;
@@ -81,7 +81,7 @@ async function getDownloadLinks(
             console.log("Failed to find CDN link URL on final download page.");
             return finalLinks;
         }
-        
+
         // --- STEP 5: Scrape CDN Page to get Final Download Buttons ---
         response = await axios.get(cdnLinkUrl, { headers: { ...headers, Referer: finalDownloadPageUrl } });
         $ = cheerio.load(response.data);
@@ -90,7 +90,7 @@ async function getDownloadLinks(
         $('button[onclick^="download_video"]').each((_, element) => {
             const btnEl = $(element);
             const qualityText = btnEl.text().trim(); // e.g., "Normal quality 1128x480, 1.0 GB"
-            
+
             // Extract Quality (e.g., Normal/Low) and Size (e.g., 1.0 GB)
             const qualityMatch = qualityText.match(/(Normal|Low)\squality/i);
             const quality = qualityMatch ? qualityMatch[1] : 'Unknown';
@@ -101,14 +101,14 @@ async function getDownloadLinks(
             finalLinks.push({
                 title: `${movieTitle} - ${qualityText}`,
                 // Use extracted quality (Normal/Low)
-                quality: quality, 
+                quality: quality,
                 // episodesLink points to the final button page (since direct link is JS-driven)
-                episodesLink: cdnLinkUrl, 
+                episodesLink: cdnLinkUrl,
                 directLinks: [
                     {
                         title: `Download (${size})`,
                         // Use the button page as the link (requires further processing if a direct file link is needed)
-                        link: cdnLinkUrl, 
+                        link: cdnLinkUrl,
                         type: "movie",
                     },
                 ],
@@ -156,12 +156,12 @@ export const getMeta = async function ({
             synopsis: "",
             image: "",
             imdbId: "",
-            type: "movie", 
+            type: "movie",
             linkList: [],
         };
 
         // --- Metadata Extraction ---
-        result.title = detailEl.find(".detail-mod h3").text().trim() || 
+        result.title = detailEl.find(".detail-mod h3").text().trim() ||
                        detailEl.find(".breadcrumb .active span[itemprop='name']").text().trim().replace('(Tamil)', '').trim() ||
                        $("title").text().split("|")[0].trim();
 
@@ -169,9 +169,9 @@ export const getMeta = async function ({
         if (result.image.startsWith("//")) result.image = "https:" + result.image;
 
         result.synopsis = detailEl.find(".desc p").text().trim() || "Synopsis not found.";
-        result.imdbId = detailEl.find("#imdb_id").text().trim(); 
-        result.type = "movie"; 
-        
+        result.imdbId = detailEl.find("#imdb_id").text().trim();
+        result.type = "movie";
+
         const qualityText = detailEl.find(".mvici-right .quality a").text().trim() || "Unknown";
 
         // --- LinkList Aggregation ---
@@ -180,21 +180,21 @@ export const getMeta = async function ({
         // 1. Fetch deep download links
         const watchButton = detailEl.find(".ch_btn_box a.bwac-btn");
         const watchLinkUrl = watchButton.attr("href");
-        
+
         if (watchLinkUrl) {
             const deepDownloadLinks = await getDownloadLinks(watchLinkUrl, result.title, providerContext);
             finalLinks = finalLinks.concat(deepDownloadLinks);
         }
-        
+
         // 2. Fetch External Links (excluding "Download Android APP")
         detailEl.find(".mobile-btn a.mod-btn").each((index, element) => {
             const btnEl = $(element);
             const linkUrl = btnEl.attr("href");
-            
-            const rawTitle = btnEl.attr("title") ?? ''; 
+
+            const rawTitle = btnEl.attr("title") ?? '';
             const fallbackTitle = btnEl.text().trim();
-            const title = rawTitle.trim() || fallbackTitle; 
-            
+            const title = rawTitle.trim() || fallbackTitle;
+
             // EXCLUSION: Skip the Android App link
             if (title.includes('Download Android APP')) {
                 return;
@@ -202,14 +202,14 @@ export const getMeta = async function ({
 
             if (linkUrl && (title.includes('Download') || title.includes('Watch') || title.includes('Join Us'))) {
                  finalLinks.push({
-                    title: `${result.title} - ${title}`, 
+                    title: `${result.title} - ${title}`,
                     quality: 'External Link',
                     episodesLink: linkUrl,
                     directLinks: [
                         {
                             title: title,
                             link: linkUrl,
-                            type: "movie", 
+                            type: "movie",
                         }
                     ]
                  });

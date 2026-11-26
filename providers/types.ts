@@ -7,12 +7,26 @@ export interface Content {
   [key: string]: any;
 }
 
-// getPosts
+export interface PostPreview {
+  url: string;
+  type?: "video" | "gif" | "image";
+  headers?: Record<string, string>;
+}
+
+// getPosts and getSearchPosts
 export interface Post {
   title: string;
   link: string;
   image: string;
   provider?: string;
+  aspectRatio?: number | string;
+  borderRadius?: number;
+  tag?: string;
+  cornerTag?: string;
+  preview?: string | PostPreview;
+  previewVideo?: string;
+  previewGif?: string;
+  previewHeaders?: Record<string, string>;
 }
 
 export type TextTracks = {
@@ -22,14 +36,38 @@ export type TextTracks = {
   uri: string;
 }[];
 
+export interface SkipInterval {
+  title?: string;
+  from: number;
+  to: number;
+}
+
 // getStream
+/** JSON-serializable DRM configuration returned by a provider. */
+export interface StreamDrm {
+  type: 'widevine' | 'playready' | 'clearkey' | 'fairplay';
+  licenseServer?: string;
+  /** License request headers, separate from stream/manifest headers. */
+  headers?: Record<string, string>;
+  /** ClearKey key IDs mapped to keys, both 32-character hexadecimal strings. */
+  clearKeys?: Record<string, string>;
+  multiDrm?: boolean;
+  contentId?: string;
+  certificateUrl?: string;
+  base64Certificate?: boolean;
+}
+
 export interface Stream {
   server: string;
   link: string;
   type: string;
-  quality?: "360" | "480" | "720" | "1080" | "2160";
+  quality?: "360" | "480" | "720" | "1080" | "2160" | string;
+  tag?: string;
+  tags?: string[];
   subtitles?: TextTracks;
   headers?: any;
+  drm?: StreamDrm;
+  skip?: SkipInterval[];
 }
 
 // getInfo
@@ -42,6 +80,7 @@ export interface Info {
   imdbId: string;
   tmdbId?: string;
   type: string;
+  quickDownload?: boolean;
   tags?: string[];
   cast?: string[];
   rating?: string;
@@ -54,18 +93,23 @@ export interface EpisodeLink {
   link: string;
   description?: string;
   image?: string;
+  quickDownload?: boolean;
+  skip?: SkipInterval[];
 }
 
 export interface Link {
   title: string;
   quality?: string;
   episodesLink?: string;
+  quickDownload?: boolean;
   directLinks?: {
     title: string;
     link: string;
     type?: "movie" | "series";
     description?: string;
     image?: string;
+    quickDownload?: boolean;
+    skip?: SkipInterval[];
   }[];
 }
 
@@ -75,10 +119,14 @@ export interface Catalog {
   filter: string;
 }
 
+export type CatalogList =
+  | Catalog[]
+  | ((params?: { signal?: AbortSignal; providerContext?: ProviderContext }) => Promise<Catalog[]> | Catalog[]);
+
 export interface ProviderType {
   searchFilter?: string;
-  catalog: Catalog[];
-  genres: Catalog[];
+  catalog: CatalogList;
+  genres: CatalogList;
   blurImage?: boolean;
   nonStreamableServer?: string[];
   nonDownloadableServer?: string[];
@@ -87,11 +135,13 @@ export interface ProviderType {
     type,
     signal,
     providerContext,
+    isDownload,
   }: {
     link: string;
     type: string;
-    signal: AbortSignal;
+    signal?: AbortSignal;
     providerContext: ProviderContext;
+    isDownload?: boolean;
   }) => Promise<Stream[]>;
   GetHomePosts: ({
     filter,
@@ -152,6 +202,10 @@ export interface OpenWebViewOptions {
   force?: boolean;
   // If set, the dialog auto-cancels (rejects) after this many milliseconds.
   timeoutMs?: number;
+
+  // Custom JavaScript injected into the WebView. Can communicate back via:
+  // window.ReactNativeWebView.postMessage(JSON.stringify({ __waf: true, data: ... }))
+  injectedJavaScript?: string;
 }
 
 // Result returned to the provider after the user solves the challenge.
@@ -169,13 +223,74 @@ export interface OpenWebViewResult {
   url: string;
 }
 
+export interface ProviderKvStore {
+  get: <T = unknown>(key: string) => Promise<T | undefined>;
+  set: (key: string, value: unknown) => Promise<void>;
+  delete: (key: string) => Promise<boolean>;
+  keys: () => Promise<string[]>;
+  clear: () => Promise<void>;
+}
+
+interface SettingsFieldBase {
+  key: string;
+  label: string;
+  description?: string;
+}
+
+interface SettingsTextField extends SettingsFieldBase {
+  type: "text";
+  defaultValue?: string;
+  placeholder?: string;
+}
+
+interface SettingsToggleField extends SettingsFieldBase {
+  type: "toggle";
+  defaultValue?: boolean;
+}
+
+interface SettingsSelectField extends SettingsFieldBase {
+  type: "select";
+  options: { label: string; value: string }[];
+  defaultValue?: string;
+}
+
+interface SettingsMultiSelectField extends SettingsFieldBase {
+  type: "multiselect";
+  options: { label: string; value: string }[];
+  defaultValue?: string[];
+}
+
+interface SettingsNumberField extends SettingsFieldBase {
+  type: "number";
+  defaultValue?: number;
+  min?: number;
+  max?: number;
+}
+
+export interface SettingsButtonField extends SettingsFieldBase {
+  type: "button";
+  /** Optional button text; defaults to label. */
+  buttonLabel?: string;
+  defaultValue?: never;
+}
+
+export type SettingsField =
+  | SettingsButtonField
+  | SettingsTextField
+  | SettingsToggleField
+  | SettingsSelectField
+  | SettingsMultiSelectField
+  | SettingsNumberField;
+
 export type ProviderContext = {
   axios: AxiosStatic;
-  Aes: any; // AES encryption utility, if used
   commonHeaders: Record<string, string>;
   cheerio: typeof cheerio;
   openWebView: (
     url: string,
     options?: OpenWebViewOptions,
   ) => Promise<OpenWebViewResult>;
+  kvStore: ProviderKvStore;
+  /** Existing cookies for this source author and URL; does not open a browser. */
+  getCookies?: (url: string) => Promise<Record<string, string>>;
 };
