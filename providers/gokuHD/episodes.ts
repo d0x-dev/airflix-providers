@@ -1,1 +1,1 @@
-export { getEpisodes } from "../airflix/episodes";
+export { getEpisodes } from "../vega/episodes";

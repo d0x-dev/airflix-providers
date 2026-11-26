@@ -20,7 +20,7 @@ export const getPosts = async function ({
     const res = await axios.get(url, { headers: commonHeaders, signal });
     // The API might return an array directly or wrap it in a data object
     const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
-    
+
     return data.map((item: any) => ({
       title: item.title,
       link: `https://anime.uniquestream.net/api/v1/series/${item.content_id}`,
@@ -55,9 +55,9 @@ export const getSearchPosts = async function ({
     const res = await axios.get(url, { headers: commonHeaders, signal });
     const series = res.data?.series || [];
     const movies = res.data?.movies || [];
-    
+
     const combined = [...series, ...movies];
-    
+
     return combined.map((item: any) => ({
       title: item.title,
       link: `https://anime.uniquestream.net/api/v1/series/${item.content_id}`,

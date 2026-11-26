@@ -1,3 +1,4 @@
+import { formatEpisodeTitle } from "../getCinemetaMeta";
 import { EpisodeLink, Info, Link, ProviderContext } from "../types";
 import { getBaseUrl } from "../getBaseUrl";
 
@@ -17,6 +18,7 @@ export const getMeta = async function ({
       synopsis: "",
       image: "",
       imdbId: data?.meta?.imdb_id || "",
+      tmdbId: data?.meta?.moviedb_id?.toString() || undefined,
       type: data?.meta?.type || "movie",
     };
     const baseUrl = await getBaseUrl("ridomovies");
@@ -57,7 +59,7 @@ export const getMeta = async function ({
           season.set(video?.season, []);
         }
         season.get(video?.season).push({
-          title: "Episode " + video?.episode,
+          title: formatEpisodeTitle(video?.episode, video?.name),
           link: "",
         });
       });

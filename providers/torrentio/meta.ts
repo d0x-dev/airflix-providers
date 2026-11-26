@@ -3,14 +3,16 @@ import {
   CinemetaMeta,
   CinemetaVideo,
   enrichCinemetaEpisodes,
+  formatEpisodeTitle,
   getCinemetaMeta,
 } from "../getCinemetaMeta";
+import { enrichEpisodesWithSkipTimings } from "../theintrodb";
 import { EpisodeLink, Info, Link, ProviderContext } from "../types";
 import { throwProviderError } from "../providerErrors";
 
 function getRequest(link: string): { imdbId: string; type: string } {
   const imdbId = link.match(/tt\d+/)?.[0] || "";
-  const type = /\/series\//i.test(link) ? "series" : "movie";
+  const type = /\bseries\b/i.test(link) ? "series" : "movie";
   if (!imdbId) throw new Error(`Missing IMDb ID in metadata link: ${link}`);
   return { imdbId, type };
 }
@@ -44,28 +46,61 @@ export const getMeta = async function ({
   try {
     const { imdbId, type } = getRequest(link);
     const meta = await getCinemetaMeta(imdbId, type, providerContext);
+    if (!meta) {
+      return {
+        title: imdbId,
+        synopsis: "",
+        image: "",
+        imdbId,
+        type,
+        linkList: [],
+      };
+    }
     const linkList: Link[] = [];
 
     if (type === "series") {
       const seasons = new Map<number, EpisodeLink[]>();
+      const now = Date.now();
       for (const video of meta.videos || []) {
         const episode = video.episode ?? video.number;
         if (!video.season || video.season <= 0 || !episode) continue;
+
+        // Filter out unreleased future episodes
+        const releaseStr = video.released || video.firstAired;
+        if (releaseStr) {
+          const releaseTime = new Date(releaseStr).getTime();
+          if (!isNaN(releaseTime) && releaseTime > now) {
+            continue;
+          }
+        }
+
         const episodes = seasons.get(video.season) || [];
         episodes.push({
-          title: `Episode ${episode}`,
+          title: formatEpisodeTitle(episode, video.name),
           link: createPayload(imdbId, "series", meta, video),
         });
         seasons.set(video.season, episodes);
       }
+      const skipTimings = await providerContext.kvStore?.get<boolean>("torrentio_skipTimings");
       for (const season of [...seasons.keys()].sort((a, b) => a - b)) {
+        const seasonEpisodes = seasons.get(season) || [];
+        if (seasonEpisodes.length === 0) continue;
+        let directLinks = enrichCinemetaEpisodes(
+          seasonEpisodes,
+          meta.videos || [],
+          season,
+        );
+        if (skipTimings ?? true) {
+          directLinks = await enrichEpisodesWithSkipTimings(
+            directLinks,
+            imdbId,
+            season,
+            providerContext,
+          );
+        }
         linkList.push({
           title: `Season ${season}`,
-          directLinks: enrichCinemetaEpisodes(
-            seasons.get(season) || [],
-            meta.videos || [],
-            season,
-          ),
+          directLinks,
         });
       }
     } else {
@@ -87,7 +122,7 @@ export const getMeta = async function ({
         synopsis: meta.description || "",
         image: meta.background || meta.poster || "",
         poster: meta.poster || "",
-        imdbId: "",
+        imdbId: imdbId || meta.imdb_id || "",
         type,
         linkList,
       },

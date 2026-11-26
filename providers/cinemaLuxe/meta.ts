@@ -1,3 +1,4 @@
+import { formatSeasonLinks } from "../formatSeasonLinks";
 import { Info, Link, ProviderContext } from "../types";
 
 export const getMeta = async function ({
@@ -74,6 +75,7 @@ export const getMeta = async function ({
         }
       });
     }
+    const quickDownload = await providerContext.kvStore?.get<boolean>("cinemaLuxe_quickDownload");
     return {
       title,
       tags,
@@ -82,7 +84,8 @@ export const getMeta = async function ({
       image,
       imdbId,
       type,
-      linkList: links,
+      quickDownload: quickDownload ?? true,
+      linkList: formatSeasonLinks(links),
     };
   } catch (err) {
     console.error(err);

@@ -12,12 +12,12 @@ export const getMeta = async function ({
   try {
     const res = await axios.get(link, { headers: commonHeaders });
     const data = res.data;
-    
+
     // Sometimes the data might be nested or direct depending on the series API
     const series = data.content_id ? data : data.data || data;
 
     const linkList: any[] = [];
-    
+
     if (series.seasons && series.seasons.length > 0) {
       for (const season of series.seasons) {
         linkList.push({

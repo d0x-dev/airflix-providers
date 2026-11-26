@@ -7,11 +7,13 @@ export async function getStream({
   type,
   signal,
   providerContext,
+  isDownload,
 }: {
   link: string;
   type: string;
   signal: AbortSignal;
   providerContext: ProviderContext;
+  isDownload?: boolean;
 }) {
   const { axios, cheerio, commonHeaders } = providerContext;
   try {
@@ -21,13 +23,32 @@ export async function getStream({
         const urlObj = new URL(processLink);
         const id = processLink.split("/").filter(Boolean).pop();
         const apiUrl = `${urlObj.origin}/api/s/${id}/hubcloud`;
-        const res = await fetch(apiUrl, {
-          headers: commonHeaders,
-          redirect: "follow",
-          signal,
-        });
-        if (res.url && res.url.includes("hubcloud")) {
-          processLink = res.url;
+        try {
+          const apiRes = await axios.get(apiUrl, {
+            headers: commonHeaders,
+            maxRedirects: 5,
+            signal,
+          });
+          const finalUrl =
+            apiRes.request?.res?.responseUrl || apiRes.config?.url;
+          if (finalUrl && finalUrl.includes("hubcloud")) {
+            processLink = finalUrl;
+          } else if (
+            apiRes.data &&
+            typeof apiRes.data === "object" &&
+            apiRes.data.link
+          ) {
+            processLink = apiRes.data.link;
+          }
+        } catch {
+          const res = await fetch(apiUrl, {
+            headers: commonHeaders,
+            redirect: "follow",
+            signal,
+          });
+          if (res.url && res.url.includes("hubcloud")) {
+            processLink = res.url;
+          }
         }
       } catch (e) {
         console.log("Error resolving oxxfile link", e);
@@ -40,6 +61,9 @@ export async function getStream({
       axios,
       cheerio,
       commonHeaders,
+      providerContext,
+      isDownload,
+      "1cinevood",
     );
 
     return hubcloudLink;

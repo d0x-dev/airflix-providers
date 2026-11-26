@@ -62,7 +62,12 @@ export const getEpisodes = function ({
         }
       });
 
-      return episodes;
+      return providerContext.kvStore?.get<boolean>("Joya9tv_quickDownload").then((quickDownload) => {
+        return episodes.map((e) => ({
+          ...e,
+          quickDownload: quickDownload ?? true,
+        }));
+      });
     })
     .catch((err) => {
       throwProviderError("Joya9TV", "episodes", err);

@@ -5,6 +5,7 @@ import {
   getCinemetaMeta,
   readCinemetaContext,
 } from "../getCinemetaMeta";
+import { enrichEpisodesWithSkipTimings } from "../theintrodb";
 
 // यहाँ `getEpisodes` फ़ंक्शन मान रहा है कि यह उस पेज को स्क्रैप कर रहा है
 // जो 'Download Links' बटन से प्राप्त हुआ है (जैसे m4ulinks.com/number/42882)
@@ -23,12 +24,7 @@ export const getEpisodes = async function ({
     const requestUrl = context.requestUrl;
     // Note: Cookies को URL के आधार पर अपडेट करने की आवश्यकता हो सकती है
     let res = await axios.get(requestUrl, {
-      headers: {
-        ...headers,
-        // Cloudflare/Bot protection के लिए Hardcoded cookie यहाँ आवश्यक हो सकता है
-        cookie:
-          "ext_name=ojplmecpdpgccookcobabopnaifgidhf; cf_clearance=Zl2yiOCN3pzGUd0Bgs.VyBXniJooDbG2Tk1g7DEoRnw-1756381111-1.2.1.1-RVPZoWGCAygGNAHavrVR0YaqASWZlJyYff8A.oQfPB5qbcPrAVud42BzsSwcDgiKAP0gw5D92V3o8XWwLwDRNhyg3DuL1P8wh2K4BCVKxWvcy.iCCxczKtJ8QSUAsAQqsIzRWXk29N6X.kjxuOTYlfB2jrlq12TRDld_zTbsskNcTxaA.XQekUcpGLseYqELuvlNOQU568NZD6LiLn3ICyFThMFAx6mIcgXkxVAvnxU; xla=s4t",
-      },
+      headers,
     });
 
     if (
@@ -76,89 +72,75 @@ export const getEpisodes = async function ({
     }
 
     const $ = cheerio.load(res.data);
-    const container = $(".entry-content,.entry-inner, .download-links-div");
-
-    // .unili-content,.code-block-1 जैसे अवांछित तत्वों को हटा दें
-    $(".unili-content,.code-block-1").remove();
-
+    $("script,style,.code-block,.unili-content,nav,footer").remove();
+    const container = $("#container-content-single").first().length ? $("#container-content-single").first() : $("body");
     const episodes: EpisodeLink[] = [];
-
-    // The site changed its layout. Links are now inside <p> tags following <h3> or <h4> tags with quality info.
-    // We can also just look for the <a> tags directly and find their preceding quality headers.
-    const hElements = container.find("h3, h4, h5, p");
-
-    hElements.each((index, element) => {
+    let activeTitle = "";
+    const seen = new Set<string>();
+    // Walk in document order: the host nests later episodes inside wrappers,
+    // and its first episode is outside .entry-content entirely.
+    container.find("h2,h3,h4,h5,p,a[href]").each((_, element) => {
       const el = $(element);
-      const title = el.text().trim();
-
-      // The download buttons are usually in the next <p> tag
-      const downloadButtons = el.nextAll().find("a").first();
-      const link = downloadButtons.attr("href");
-
-      if (
-        title &&
-        link &&
-        title.match(/Episode|Ep|E\d+/i) &&
-        title.length < 150
-      ) {
-        // Clean up the title
-        const cleanedTitle = title
-          .replace(/\s+/g, " ")
-          .trim()
-          .replace(/^[-:\s]+|[-:\s]+$/g, "")
-          .replace(/^episodes?\s*:\s*/i, "Episode ");
-
-        // Deduplicate
-        if (!episodes.some((e) => e.link === link)) {
-          episodes.push({
-            title: cleanedTitle,
-            link: link,
-          });
-        }
+      if (!el.is("a")) {
+        if (el.find("a").length) return;
+        const text = el.text().replace(/\s+/g, " ").trim();
+        const match = text.match(/\b(?:episodes?|ep)\s*[:. -]*\s*(\d+)|\bE(\d+)\b/i);
+        if (match && text.length < 150) activeTitle = "Episode " + (match[1] || match[2]);
+        else if (el.is("h2,h3,h4,h5")) activeTitle = "";
+        return;
       }
+      if (!activeTitle || seen.has(activeTitle)) return;
+      const href = el.attr("href") || "";
+      if (!/hubcloud|hubdrive|mdrive|fastdl|filebee|gdflix|vcloud/i.test(href)) return;
+      const target = new URL(href, requestUrl).href;
+      if (!/^https?:/i.test(target)) return;
+      seen.add(activeTitle);
+      episodes.push({title: activeTitle, link: target});
     });
 
-    // Fallback: if no episodes found by heading, just grab all mdrive/fastdl links
-    if (episodes.length === 0) {
-      $("a").each((i, el) => {
-        const href = $(el).attr("href");
-        if (
-          href &&
-          (href.includes("mdrive") ||
-            href.includes("fastdl") ||
-            href.includes("filebee") ||
-            href.includes("gdflix"))
-        ) {
-          const title =
-            $(el).parent().prev().text().trim() ||
-            $(el).text().trim() ||
-            `Episode ${i + 1}`;
-          if (!episodes.some((e) => e.link === href)) {
-            episodes.push({
-              title: title
-                .replace(/\s+/g, " ")
-                .trim()
-                .replace(/^[-:\s]+|[-:\s]+$/g, "")
-                .replace(/^episodes?\s*:\s*/i, "Episode "),
-              link: href,
-            });
-          }
-        }
-      });
+    const quickDownload = await providerContext.kvStore?.get<boolean>("movies4u_quickDownload");
+    if (!context.imdbId || !context.season) {
+      return episodes.map((e) => ({
+        ...e,
+        quickDownload: quickDownload ?? true,
+      }));
     }
 
-    if (!context.imdbId || !context.season) return episodes;
+    let enriched = episodes;
+    try {
+      const cinemeta = await getCinemetaMeta(
+        context.imdbId,
+        "series",
+        providerContext,
+      );
+      if (cinemeta) {
+        enriched = enrichCinemetaEpisodes(
+          episodes,
+          cinemeta.videos || [],
+          context.season,
+        );
+      }
+    } catch (e) {
+      console.warn("Movies4u: Cinemeta episode lookup failed", e);
+    }
 
-    const cinemeta = await getCinemetaMeta(
-      context.imdbId,
-      "series",
-      providerContext,
-    );
-    return enrichCinemetaEpisodes(
-      episodes,
-      cinemeta.videos || [],
-      context.season,
-    );
+    const skipTimings = await providerContext.kvStore?.get<boolean>("movies4u_skipTimings");
+    if (skipTimings ?? true) {
+      try {
+        enriched = await enrichEpisodesWithSkipTimings(
+          enriched,
+          context.imdbId,
+          context.season,
+          providerContext,
+        );
+      } catch (e) {
+        console.warn("Movies4u: Skip timings lookup failed", e);
+      }
+    }
+    return enriched.map((e) => ({
+      ...e,
+      quickDownload: quickDownload ?? true,
+    }));
   } catch (err) {
     throwProviderError("Movies4u", "episodes", err);
   }

@@ -150,6 +150,8 @@ export const getMeta = async function ({
 
     result.linkList = links;
     result.webUrl = url;
+    const quickDownload = await providerContext.kvStore?.get<boolean>("Joya9tv_quickDownload");
+    result.quickDownload = Boolean(quickDownload);
     return result;
   } catch (err) {
     throwProviderError("Joya9TV", "metadata", err);

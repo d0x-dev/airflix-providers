@@ -28,11 +28,13 @@ export async function getStream({
   type,
   signal,
   providerContext,
+  isDownload,
 }: {
   link: string;
   type: string;
   signal: AbortSignal;
   providerContext: ProviderContext;
+  isDownload?: boolean;
 }) {
   const { axios, cheerio, commonHeaders } = providerContext;
   try {
@@ -107,7 +109,16 @@ export async function getStream({
       }
     }
 
-    return await hubcloudExtractor(link, signal, axios, cheerio, commonHeaders);
+    return await hubcloudExtractor(
+      link,
+      signal,
+      axios,
+      cheerio,
+      commonHeaders,
+      providerContext,
+      isDownload,
+      "luxMovies",
+    );
   } catch (error: any) {
     throwProviderError("LuxMovies", "stream", error);
   }

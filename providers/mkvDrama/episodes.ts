@@ -19,8 +19,14 @@ export async function getEpisodes({
     providerContext,
   );
 
-  return episodes.sort((left, right) => {
-    const difference = episodeNumber(left.title) - episodeNumber(right.title);
-    return difference || left.title.localeCompare(right.title);
-  });
+  const quickDownload = await providerContext.kvStore?.get<boolean>("mkvDrama_quickDownload");
+  return episodes
+    .sort((left, right) => {
+      const difference = episodeNumber(left.title) - episodeNumber(right.title);
+      return difference || left.title.localeCompare(right.title);
+    })
+    .map((e) => ({
+      ...e,
+      quickDownload: quickDownload ?? true,
+    }));
 }

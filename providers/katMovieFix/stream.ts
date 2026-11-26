@@ -17,11 +17,13 @@ export async function getStream({
   type,
   signal,
   providerContext,
+  isDownload,
 }: {
   link: string;
   type: string;
   signal: AbortSignal;
   providerContext: ProviderContext;
+  isDownload?: boolean;
 }) {
   const { axios, cheerio, commonHeaders } = providerContext;
 
@@ -49,8 +51,13 @@ export async function getStream({
       axios,
       cheerio,
       commonHeaders,
+      providerContext,
+      isDownload,
+      "katMovieFix",
     );
-    streamLinks.push(...hubcloudStreams);
+    if (Array.isArray(hubcloudStreams)) {
+      streamLinks.push(...hubcloudStreams);
+    }
 
     return streamLinks;
   } catch (error: any) {

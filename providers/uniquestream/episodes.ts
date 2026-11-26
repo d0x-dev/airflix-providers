@@ -19,10 +19,10 @@ export const getEpisodes = async function ({
       // url includes page=1 already, but we need to replace it with current page
       // also replace limit to 20
       const pageUrl = url.replace(/page=\d+/, `page=${page}`).replace(/limit=\d+/, `limit=20`);
-      
+
       const res = await axios.get(pageUrl, { headers: commonHeaders });
       const data = Array.isArray(res.data) ? res.data : (res.data?.data || []);
-      
+
       if (data.length > 0) {
         allEpisodes = allEpisodes.concat(data);
         page++;
